@@ -126,7 +126,7 @@ class TeleopSessionLifecycle:
     This class is responsible for:
 
     1. Building the retargeting pipeline from configuration
-    2. Adding a parallel ``ControllersSource`` for button-state access
+    2. Optionally adding a parallel ``ControllersSource`` for button-state access
     3. Building the optional ``teleop_control_pipeline`` for headset-driven
        start/stop/reset via a message channel
     4. Acquiring OpenXR handles from Kit's XR bridge extension
@@ -505,7 +505,7 @@ class TeleopSessionLifecycle:
         # there is no live controller to vibrate during scripted MCAP playback.
         self._haptic_sink = (
             self._build_haptic_sink(self._button_controllers)
-            if self._haptic_cfg is not None and not self._is_replay
+            if self._haptic_cfg is not None and not self._is_replay and self._button_controllers is not None
             else None
         )
 
@@ -609,6 +609,13 @@ class TeleopSessionLifecycle:
         """
         from isaacteleop.retargeting_engine.deviceio_source_nodes import ControllersSource
         from isaacteleop.retargeting_engine.interface import OutputCombiner
+
+        if not self._cfg.controller_button_polling:
+            # Hand-tracking-only pipelines skip the controller tracker entirely.
+            # Keep the attribute defined so the haptic sink in start() stays safe.
+            self._button_controllers = None
+            logger.info("Controller button polling disabled; controller tracker was not created")
+            return user_pipeline
 
         # Stored on self so start() can reuse this ControllersSource's tracker for
         # the haptic sink, avoiding a second controller action-set attachment.

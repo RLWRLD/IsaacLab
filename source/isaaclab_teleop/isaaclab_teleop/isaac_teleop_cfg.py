@@ -234,6 +234,14 @@ class IsaacTeleopCfg:
     ``"START"`` command is received from xr_core via the message bus.
     """
 
+    controller_button_polling: bool = True
+    """Whether to add a controller source for session-level button shortcuts.
+
+    Disable this for hand-tracking-only pipelines to avoid creating an unused
+    controller tracker.  The right-controller A-button anchor rotation shortcut
+    is unavailable while disabled; message-bus teleop commands are unaffected.
+    """
+
     retargeters_to_tune: Callable[[], list[BaseRetargeter]] | None = None
     """Optional callable returning retargeters to expose in the tuning UI.
 
