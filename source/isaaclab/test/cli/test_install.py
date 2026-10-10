@@ -335,19 +335,15 @@ class TestEnsureNewton:
         assert any(arg.startswith("newton[sim]") and arg.endswith(commit) for arg in install_args)
         assert any(arg.startswith("newton-usd-schemas") for arg in install_args), "schemas must be forced too"
 
-    def test_skips_when_commit_already_installed(self):
-        """When freeze already reports the pinned commit, do not reinstall."""
+    def _run_with_freeze(self, freeze: str) -> list[list[str]]:
+        """Run ``_ensure_newton`` against a ``pip freeze`` output; return the commands it ran."""
         from isaaclab.cli.commands import install
 
-        commit = install._pinned_version("newton")
         calls = []
 
         def fake_run(cmd, *args, **kwargs):
             calls.append(cmd)
-            if cmd[-1] == "freeze":
-                stdout = f"newton @ git+https://github.com/newton-physics/newton.git@{commit}\n"
-                return self._completed(stdout=stdout)
-            return self._completed()
+            return self._completed(stdout=freeze) if cmd[-1] == "freeze" else self._completed()
 
         with (
             mock.patch.object(install, "extract_python_exe", return_value="python"),
@@ -355,9 +351,42 @@ class TestEnsureNewton:
             mock.patch.object(install, "run_command", side_effect=fake_run),
         ):
             install._ensure_newton()
+        return calls
+
+    @staticmethod
+    def _schemas_pin() -> str:
+        from isaaclab.cli.commands import install
+
+        overrides = install._load_root_pyproject()["tool"]["uv"]["override-dependencies"]
+        (schemas,) = [r for r in overrides if install._requirement_name(r) == "newton-usd-schemas"]
+        return schemas.split("==", 1)[1]
+
+    def test_skips_when_commit_and_schemas_already_installed(self):
+        """When freeze already reports the pinned commit and schemas, do not reinstall."""
+        from isaaclab.cli.commands import install
+
+        commit = install._pinned_version("newton")
+        calls = self._run_with_freeze(
+            f"newton @ git+https://github.com/newton-physics/newton.git@{commit}\n"
+            f"newton-usd-schemas=={self._schemas_pin()}\n"
+        )
 
         assert not any("install" in cmd for cmd in calls), "should not install when commit already present"
         assert not any("uninstall" in cmd for cmd in calls), "should not uninstall when commit already present"
+
+    @pytest.mark.parametrize("schemas_line", ["newton-usd-schemas==0.4.1\n", ""], ids=["stale", "missing"])
+    def test_installs_schemas_when_commit_installed_but_schemas_off_pin(self, schemas_line):
+        """A pinned Newton next to stale or missing schemas still gets the schemas pin installed."""
+        from isaaclab.cli.commands import install
+
+        commit = install._pinned_version("newton")
+        calls = self._run_with_freeze(
+            f"newton @ git+https://github.com/newton-physics/newton.git@{commit}\n{schemas_line}"
+        )
+
+        install_cmds = [cmd for cmd in calls if "install" in cmd]
+        assert install_cmds, "expected a pip install call"
+        assert f"newton-usd-schemas=={self._schemas_pin()}" in install_cmds[-1]
 
 
 def test_no_shadowing_prebundled_torch_in_isaac_sim():

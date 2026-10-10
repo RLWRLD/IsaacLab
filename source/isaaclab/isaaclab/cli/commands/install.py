@@ -370,10 +370,12 @@ def _ensure_newton() -> None:
     pip_cmd = get_pip_command(python_exe)
     using_uv = pip_cmd[0] == "uv"
 
-    # git installs record the commit in freeze output; skip if it is already present.
+    # git installs record the commit in freeze output; skip only if it is already present
+    # and the schemas installed with it are at their pin too, or stale schemas never move.
     frozen = run_command(pip_cmd + ["freeze"], capture_output=True, text=True, check=False)
-    if frozen.returncode == 0 and any(
-        _requirement_name(line) == "newton" and commit in line for line in frozen.stdout.splitlines()
+    frozen_lines = frozen.stdout.splitlines() if frozen.returncode == 0 else []
+    if any(_requirement_name(line) == "newton" and commit in line for line in frozen_lines) and (
+        schemas is None or _frozen_at_pin(schemas, frozen_lines)
     ):
         print_info(f"Newton git build ({commit[:10]}) already installed.")
         return
@@ -397,6 +399,23 @@ def _requirement_name(requirement: str) -> str:
     """Extract the distribution name from a requirement string."""
     requirement = requirement.split(";", 1)[0].strip()
     return re.split(r"\s|<|>|=|!|~|\[|@", requirement, maxsplit=1)[0]
+
+
+def _frozen_at_pin(requirement: str, frozen_lines: list[str]) -> bool:
+    """Return True when ``pip freeze`` lines record the exact ``==`` pin of ``requirement``.
+
+    A requirement without an exact pin (a range, a URL) never counts as met, so the caller
+    installs it rather than guessing whether the installed version satisfies it.
+    """
+    match = re.fullmatch(r"([A-Za-z0-9._-]+)(?:\[[^\]]*\])?\s*==\s*([^\s,;]+)", requirement.split(";", 1)[0].strip())
+    if match is None:
+        return False
+    name, version = _normalize_package_name(match.group(1)), match.group(2)
+    return any(
+        _normalize_package_name(_requirement_name(line)) == name and line.split("==", 1)[-1].strip() == version
+        for line in frozen_lines
+        if "==" in line
+    )
 
 
 # Distributions installed from the PyTorch index by :func:`_ensure_cuda_torch`;
