@@ -1,7 +1,7 @@
 numpy>=2
-mujoco~=3.11.0
-mujoco-warp~=3.11.0
-newton[sim] @ git+https://github.com/RLWRLD/newton.git@cf5378db6002b5c19b86344737cdd40cb8e08f0c
+mujoco==3.12.0
+mujoco-warp==3.12.0
+newton[sim] @ git+https://github.com/RLWRLD/newton.git@713fecdc41caf0c9d726f5c016939f36e66e3dff
 newton-usd-schemas==0.5.0
 torch==2.11.0
 torchvision==0.26.0
