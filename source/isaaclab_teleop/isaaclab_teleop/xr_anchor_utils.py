@@ -152,8 +152,14 @@ class XrAnchorSynchronizer:
                     XrAnchorRotationMode.FOLLOW_PRIM,
                     XrAnchorRotationMode.FOLLOW_PRIM_SMOOTHED,
                 ):
-                    rt_prim_quat = rt_matrix.ExtractRotationQuat()
-                    rt_delta_quat = rt_prim_quat * self.__anchor_prim_initial_quat.GetInverse()
+                    # Compose the ABSOLUTE prim yaw (not the delta from the initial
+                    # pose): ``anchor_rot`` is authored relative to the anchor prim
+                    # (matching the old child-prim anchor semantics), so the world
+                    # rotation must be yaw(prim) ∘ cfg. With the delta-from-initial
+                    # form, robots spawned pre-yawed (e.g. +90° in the desk envs)
+                    # get the whole XR world rotated by that initial yaw; robots
+                    # spawned at yaw 0 behave identically under both forms.
+                    rt_delta_quat = rt_matrix.ExtractRotationQuat()
                     pxr_delta_quat = pxrGf.Quatd(rt_delta_quat.GetReal(), pxrGf.Vec3d(*rt_delta_quat.GetImaginary()))
 
                     # yaw-only about Z (right-handed, Z-up)

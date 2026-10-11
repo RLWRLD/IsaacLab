@@ -115,7 +115,10 @@ class XrAnchorManager:
                 quat_xyzw = np.asarray([x, y, z, w], dtype=np.float64)
                 _create_prim(self._xr_anchor_headset_path, prim_type="Xform", position=pos, orientation=quat_xyzw)
             except Exception as e:
-                logger.warning(f"Failed to create XR anchor prim: {e}")
+                logger.warning(f"Failed to create XR anchor prim with _create_prim: {e}")
+                self._create_xr_anchor_prim_fallback(
+                    position=self._xr_cfg.anchor_pos, quat_xyzw=(x, y, z, w)
+                )
 
         # Configure carb settings for XR rendering
         if carb is not None and hasattr(carb, "settings"):
@@ -155,6 +158,42 @@ class XrAnchorManager:
     def anchor_headset_path(self) -> str:
         """The USD path of the XR anchor prim."""
         return self._xr_anchor_headset_path
+
+    def _create_xr_anchor_prim_fallback(self, *, position, quat_xyzw) -> None:
+        """Create the anchor as a plain USD Xform when IsaacSim prim wrappers fail."""
+
+        try:
+            import omni.usd
+            from pxr import Gf, Sdf, UsdGeom
+
+            stage = omni.usd.get_context().get_stage()
+            if stage is None:
+                logger.warning("XR anchor USD fallback skipped: no USD stage available")
+                return
+
+            anchor_path = Sdf.Path(self._xr_anchor_headset_path)
+            parent_path = anchor_path.GetParentPath()
+            if parent_path and not stage.GetPrimAtPath(parent_path).IsValid():
+                logger.warning(f"XR anchor parent prim does not exist: {parent_path}")
+                return
+
+            xform = UsdGeom.Xform.Define(stage, anchor_path)
+            xform.ClearXformOpOrder()
+            # Explicit double precision: AddOrientOp() defaults to quatf and then
+            # rejects Gf.Quatd values with a type-mismatch error.
+            xform.AddTranslateOp(UsdGeom.XformOp.PrecisionDouble).Set(
+                Gf.Vec3d(float(position[0]), float(position[1]), float(position[2]))
+            )
+            x, y, z, w = (float(value) for value in quat_xyzw)
+            xform.AddOrientOp(UsdGeom.XformOp.PrecisionDouble).Set(Gf.Quatd(w, Gf.Vec3d(x, y, z)))
+            # Warning level on purpose: INFO is filtered by the default logging
+            # config, and this line is the only positive confirmation that the
+            # degraded (non-SingleXFormPrim) anchor path is active.
+            logger.warning(
+                f"Created XR anchor prim via USD fallback at {self._xr_anchor_headset_path}"
+            )
+        except Exception as fallback_error:  # noqa: BLE001
+            logger.warning(f"XR anchor USD fallback also failed: {fallback_error}")
 
     def get_world_matrix(self) -> np.ndarray:
         """Build the combined 4x4 transform from OpenXR local space to Isaac Lab world.
