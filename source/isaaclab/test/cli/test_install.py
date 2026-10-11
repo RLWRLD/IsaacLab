@@ -391,6 +391,41 @@ class TestEnsureNewton:
         assert not any("install" in cmd for cmd in calls), "should not install when release already present"
         assert not any("uninstall" in cmd for cmd in calls), "should not uninstall when release already present"
 
+    @pytest.mark.parametrize(
+        ("freeze", "installs"),
+        [
+            ("newton==1.5.2\nnewton-usd-schemas==0.5.0\n", False),
+            ("newton==1.5.2\nnewton-usd-schemas==0.4.1\n", True),
+            ("newton==1.5.2\n", True),
+        ],
+        ids=["schemas-at-pin", "schemas-stale", "schemas-missing"],
+    )
+    def test_skips_only_when_schemas_pin_is_met_too(self, freeze, installs):
+        """A pinned Newton next to stale or missing schemas still gets the schemas pin installed."""
+        from isaaclab.cli.commands import install
+
+        calls = []
+
+        def fake_run(cmd, *args, **kwargs):
+            calls.append(cmd)
+            return self._completed(stdout=freeze) if cmd[-1] == "freeze" else self._completed()
+
+        overrides = ["newton[sim]==1.5.2", "newton-usd-schemas==0.5.0"]
+        with (
+            mock.patch.object(
+                install, "_load_root_pyproject", return_value={"tool": {"uv": {"override-dependencies": overrides}}}
+            ),
+            mock.patch.object(install, "extract_python_exe", return_value="python"),
+            mock.patch.object(install, "get_pip_command", return_value=["uv", "pip"]),
+            mock.patch.object(install, "run_command", side_effect=fake_run),
+        ):
+            install._ensure_newton()
+
+        install_cmds = [cmd for cmd in calls if "install" in cmd and "uninstall" not in cmd]
+        assert bool(install_cmds) == installs
+        if installs:
+            assert "newton-usd-schemas==0.5.0" in install_cmds[-1]
+
 
 def test_no_shadowing_prebundled_torch_in_isaac_sim():
     """A prebundled torch must not shadow the pip-installed torch.
