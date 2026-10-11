@@ -349,22 +349,30 @@ def _ensure_cuda_torch() -> None:
     )
 
 
+# Packages whose exact versions Newton's simulator needs, installed with it from the same
+# [tool.uv].override-dependencies entries: Isaac Sim pins older schemas (==0.2.0), and
+# Newton's [sim] extra asks only for compatible MuJoCo releases (~=), so pip would otherwise
+# keep or pick other versions than the overrides name.
+_NEWTON_COMPANIONS = ("newton-usd-schemas", "mujoco", "mujoco-warp")
+
+
 def _ensure_newton() -> None:
-    """Install the pinned Newton release, replacing any other version.
+    """Install the pinned Newton release and its companion pins, replacing any other version.
 
     Isaac Sim bundles ``newton[sim]==1.2.0``, which satisfies the loose core bound in
     the root pyproject, so the centralized install would otherwise keep the older
     Newton. Isaac Lab owns the exact pin via ``[tool.uv].override-dependencies``
     (``uv sync`` honors it, ``pip``/``uv pip`` installs do not), so force it in here
-    from that single source.
+    from that single source, together with the overrides of :data:`_NEWTON_COMPANIONS`.
     """
     overrides = _load_root_pyproject().get("tool", {}).get("uv", {}).get("override-dependencies", [])
     requirement = next((r for r in overrides if _requirement_name(r) == "newton"), None)
     if not requirement:
         raise KeyError("Newton pin is missing from [tool.uv].override-dependencies in the root pyproject.toml.")
     pin = requirement.rsplit("@", 1)[-1] if "@" in requirement else requirement.rsplit("==", 1)[-1]
-    # Newton-matched schemas (isaacsim pins the older ==0.2.0); force it alongside newton.
-    schemas = next((r for r in overrides if _requirement_name(r) == "newton-usd-schemas"), None)
+    companions = [
+        r for name in _NEWTON_COMPANIONS for r in overrides if _normalize_package_name(_requirement_name(r)) == name
+    ]
 
     python_exe = extract_python_exe()
     pip_cmd = get_pip_command(python_exe)
@@ -372,20 +380,20 @@ def _ensure_newton() -> None:
 
     frozen = run_command(pip_cmd + ["freeze"], capture_output=True, text=True, check=False)
     frozen_lines = frozen.stdout.splitlines() if frozen.returncode == 0 else []
-    # Skip only when the schemas installed next to Newton are at their pin too; otherwise a
-    # stale or missing newton-usd-schemas never moves once the Newton pin is met.
+    # Skip only when every companion installed next to Newton satisfies its override too;
+    # otherwise a stale or missing one never moves once the Newton pin is met.
     if any(
         line.strip().lower() == f"newton=={pin}" or line.strip().lower().endswith(f"@{pin}")
         for line in frozen_lines
         if _requirement_name(line) == "newton"
-    ) and (schemas is None or _frozen_at_pin(schemas, frozen_lines)):
+    ) and all(_frozen_satisfies(companion, frozen_lines) for companion in companions):
         print_info(f"Newton {pin} already installed.")
         return
 
     print_info(f"Installing Newton {pin}...")
     uninstall_flags = ["-y"] if not using_uv else []
     run_command(pip_cmd + ["uninstall"] + uninstall_flags + ["newton"], check=False)
-    _run_package_install(pip_cmd + ["install", requirement, *([schemas] if schemas else [])])
+    _run_package_install(pip_cmd + ["install", requirement, *companions])
 
 
 # Isaac Sim install settings.
@@ -403,21 +411,33 @@ def _requirement_name(requirement: str) -> str:
     return re.split(r"\s|<|>|=|!|~|\[|@", requirement, maxsplit=1)[0]
 
 
-def _frozen_at_pin(requirement: str, frozen_lines: list[str]) -> bool:
-    """Return True when ``pip freeze`` lines record the exact ``==`` pin of ``requirement``.
+def _frozen_satisfies(requirement: str, frozen_lines: list[str]) -> bool:
+    """Return True when ``pip freeze`` lines record a version that ``requirement``'s specifiers accept.
 
-    A requirement without an exact pin (a range, a URL) never counts as met, so the caller
-    installs it rather than guessing whether the installed version satisfies it.
+    A requirement without a version specifier (a URL, a bare name) never counts as met, and
+    neither does an installed copy without a version (an editable or URL install), so the
+    caller installs it rather than guessing.
     """
-    match = re.fullmatch(r"([A-Za-z0-9._-]+)(?:\[[^\]]*\])?\s*==\s*([^\s,;]+)", requirement.split(";", 1)[0].strip())
-    if match is None:
+    # Imported here: packaging is one of the core requirements installed before this runs.
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        wanted = Requirement(requirement)
+    except InvalidRequirement:
         return False
-    name, version = _normalize_package_name(match.group(1)), match.group(2)
-    return any(
-        _normalize_package_name(_requirement_name(line)) == name and line.split("==", 1)[-1].strip() == version
-        for line in frozen_lines
-        if "==" in line
-    )
+    if wanted.url or not wanted.specifier:
+        return False
+    name = _normalize_package_name(wanted.name)
+    for line in frozen_lines:
+        if "==" not in line or _normalize_package_name(_requirement_name(line)) != name:
+            continue
+        try:
+            installed = Version(line.split("==", 1)[-1].strip())
+        except InvalidVersion:
+            return False
+        return wanted.specifier.contains(installed, prereleases=True)
+    return False
 
 
 # Distributions installed from the PyTorch index by :func:`_ensure_cuda_torch`;

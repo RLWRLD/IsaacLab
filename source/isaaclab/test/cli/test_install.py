@@ -352,7 +352,9 @@ class TestEnsureNewton:
         assert install_cmds, "expected a pip install call"
         install_args = install_cmds[-1]
         assert requirement in install_args
-        assert any(arg.startswith("newton-usd-schemas") for arg in install_args), "schemas must be forced too"
+        for name in ("newton-usd-schemas", "mujoco", "mujoco-warp"):  # forced with it, from their overrides
+            pin = next(r for r in overrides if install._requirement_name(r) == name)
+            assert pin in install_args, f"{pin} must be installed with Newton"
 
     @pytest.mark.parametrize(
         ("requirement", "freeze_line"),
@@ -392,25 +394,28 @@ class TestEnsureNewton:
         assert not any("uninstall" in cmd for cmd in calls), "should not uninstall when release already present"
 
     @pytest.mark.parametrize(
-        ("freeze", "installs"),
+        ("schemas", "freeze", "installs"),
         [
-            ("newton==1.5.2\nnewton-usd-schemas==0.5.0\n", False),
-            ("newton==1.5.2\nnewton-usd-schemas==0.4.1\n", True),
-            ("newton==1.5.2\n", True),
+            ("newton-usd-schemas==0.5.0", "newton-usd-schemas==0.5.0\nmujoco==3.12.0\nmujoco-warp==3.12.0\n", False),
+            ("newton-usd-schemas==0.5.0", "newton-usd-schemas==0.4.1\nmujoco==3.12.0\nmujoco-warp==3.12.0\n", True),
+            ("newton-usd-schemas==0.5.0", "mujoco==3.12.0\nmujoco-warp==3.12.0\n", True),
+            ("newton-usd-schemas==0.5.0", "newton-usd-schemas==0.5.0\nmujoco==3.12.1\nmujoco-warp==3.12.0\n", True),
+            ("newton-usd-schemas>=0.4.1", "newton-usd-schemas==0.5.0\nmujoco==3.12.0\nmujoco-warp==3.12.0\n", False),
         ],
-        ids=["schemas-at-pin", "schemas-stale", "schemas-missing"],
+        ids=["all-at-pin", "schemas-stale", "schemas-missing", "mujoco-stale", "schemas-range-met"],
     )
-    def test_skips_only_when_schemas_pin_is_met_too(self, freeze, installs):
-        """A pinned Newton next to stale or missing schemas still gets the schemas pin installed."""
+    def test_skips_only_when_every_companion_requirement_is_met(self, schemas, freeze, installs):
+        """A pinned Newton next to a stale or missing companion still gets the companions installed;
+        a range requirement (upstream's schemas override) is met by any version it accepts."""
         from isaaclab.cli.commands import install
 
         calls = []
 
         def fake_run(cmd, *args, **kwargs):
             calls.append(cmd)
-            return self._completed(stdout=freeze) if cmd[-1] == "freeze" else self._completed()
+            return self._completed(stdout="newton==1.5.2\n" + freeze) if cmd[-1] == "freeze" else self._completed()
 
-        overrides = ["newton[sim]==1.5.2", "newton-usd-schemas==0.5.0"]
+        overrides = ["mujoco==3.12.0", "mujoco-warp==3.12.0", "newton[sim]==1.5.2", schemas]
         with (
             mock.patch.object(
                 install, "_load_root_pyproject", return_value={"tool": {"uv": {"override-dependencies": overrides}}}
@@ -424,7 +429,7 @@ class TestEnsureNewton:
         install_cmds = [cmd for cmd in calls if "install" in cmd and "uninstall" not in cmd]
         assert bool(install_cmds) == installs
         if installs:
-            assert "newton-usd-schemas==0.5.0" in install_cmds[-1]
+            assert {schemas, "mujoco==3.12.0", "mujoco-warp==3.12.0"} <= set(install_cmds[-1])
 
 
 def test_no_shadowing_prebundled_torch_in_isaac_sim():
