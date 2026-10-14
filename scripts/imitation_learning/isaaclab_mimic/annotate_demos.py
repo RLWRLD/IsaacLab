@@ -35,6 +35,15 @@ parser.add_argument(
     default=False,
     help="Enable annotating start points of subtasks.",
 )
+parser.add_argument(
+    "--reset_sim_buffer_each_episode",
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help=(
+        "Call env.sim.reset() before replaying each episode."
+        " Use --no-reset_sim_buffer_each_episode to preserve simulation buffers."
+    ),
+)
 
 parser.add_argument("--external_callback", default=None, help="Fully qualified path to an externally defined callback.")
 # append AppLauncher cli args
@@ -357,7 +366,8 @@ def replay_episode(
     # read initial state and actions from the loaded episode
     initial_state = episode.data["initial_state"]
     actions = episode.data["actions"]
-    env.sim.reset()
+    if args_cli.reset_sim_buffer_each_episode:
+        env.sim.reset()
     env.recorder_manager.reset()
     env.reset_to(initial_state, None, is_relative=True)
     first_action = True
