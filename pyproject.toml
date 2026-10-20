@@ -402,9 +402,9 @@ environments = [
 # Torch routes through [tool.uv.sources]. Values mirror [tool.isaaclab.versions] where applicable.
 override-dependencies = [
     "numpy>=2",
-    "mujoco==3.12.0",
-    "mujoco-warp==3.12.0",
-    "newton[sim] @ git+https://github.com/RLWRLD/newton.git@713fecdc41caf0c9d726f5c016939f36e66e3dff",
+    "mujoco==3.15.0",
+    "mujoco-warp==3.15.0",
+    "newton[sim] @ git+https://github.com/RLWRLD/newton.git@9c28c80c1ba134e54c4ee63cbbf251cf3eec7adc",
     # Force the Newton-matched schemas over isaacsim's ==0.2.0 pin.
     "newton-usd-schemas==0.5.0",
     "torch==2.11.0",
